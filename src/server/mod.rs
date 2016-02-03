@@ -111,6 +111,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::marker::PhantomData;
 use std::net::{SocketAddr/*, ToSocketAddrs*/};
+use std::sync::mpsc;
 use std::thread;
 
 use std::time::Duration;
@@ -194,7 +195,9 @@ impl<T> Server<T> where T: TryAccept + Evented, <T as TryAccept>::Output: Transp
 
 impl Server<HttpListener> {
     pub fn http(addr: &str) -> ::Result<Server<HttpListener>> {
-        HttpListener::bind(&addr.parse().unwrap())
+        use ::mio::tcp::TcpListener;
+        TcpListener::bind(&addr.parse().unwrap())
+            .map(HttpListener)
             .map(Server::new)
             .map_err(From::from)
     }
@@ -218,40 +221,43 @@ impl Server<HttpListener> {
     /// Binds to a socket and starts handling connections.
     pub fn handle<H>(self, mut factory: H) -> ::Result<Listening>
     where H: HandlerFactory<HttpStream> {
-        let addr = try!(self.listener.local_addr());
-        //let (tx, rx) = ::std::sync::mpsc::channel();
+        let addr = try!(self.listener.0.local_addr());
+        let (notifier_tx, notifier_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let listener = self.listener;
-        let handle = thread::Builder::new().name("hyper-server".to_owned()).spawn(move || {
+        let handle = try!(thread::Builder::new().name("hyper-server".to_owned()).spawn(move || {
             let mut loop_ = rotor::Loop::new(&rotor::Config::new()).unwrap();
             loop_.add_machine_with(move |scope| {
+                try!(notifier_tx.send(scope.notifier()));
                 try!(scope.register(&listener, EventSet::readable(), PollOpt::edge()));
-                Ok(ServerFsm::Listener::<HttpListener, _, H>(listener, PhantomData))
+                Ok(ServerFsm::Listener::<HttpListener, _, H>(listener, shutdown_rx, PhantomData))
             }).unwrap();
             loop_.run(move || {
                 message::Message::new(factory.create())
             }).unwrap();
-        }).unwrap();
+        }));
 
-        //let tick = rx.recv().unwrap();
+        let notifier = notifier_rx.recv().unwrap();
 
         Ok(Listening {
             addr: addr,
-            handle: Some((handle,)),
+            shutdown: (shutdown_tx, notifier),
+            handle: Some(handle),
         })
     }
 }
 
 enum ServerFsm<A, F, H>
-where A: TryAccept,
+where A: TryAccept + rotor::Evented,
       A::Output: Transport,
       F: http::MessageHandlerFactory<A::Output, Output=message::Message<H::Output, A::Output>>,
       H: HandlerFactory<A::Output> {
-    Listener(A, PhantomData<F>),
+    Listener(A, mpsc::Receiver<Shutdown>, PhantomData<F>),
     Conn(http::Conn<A::Output, message::Message<H::Output, A::Output>>)
 }
 
 impl<A, F, H> rotor::Machine for ServerFsm<A, F, H>
-where A: TryAccept,
+where A: TryAccept + rotor::Evented,
       A::Output: Transport,
       F: http::MessageHandlerFactory<A::Output, Output=message::Message<H::Output, A::Output>>,
       H: HandlerFactory<A::Output> {
@@ -265,16 +271,16 @@ where A: TryAccept,
 
     fn ready(self, events: EventSet, scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
         match self {
-            ServerFsm::Listener(listener, m) => {
+            ServerFsm::Listener(listener, rx, m) => {
                 match listener.accept() {
                     Ok(Some(conn)) => {
-                        rotor::Response::spawn(ServerFsm::Listener(listener, m), conn)
+                        rotor::Response::spawn(ServerFsm::Listener(listener, rx, m), conn)
                     },
-                    Ok(None) => rotor::Response::ok(ServerFsm::Listener(listener, m)),
+                    Ok(None) => rotor::Response::ok(ServerFsm::Listener(listener, rx, m)),
                     Err(e) => {
                         error!("listener accept error {}", e);
                         // usually fine, just keep listening
-                        rotor::Response::ok(ServerFsm::Listener(listener, m))
+                        rotor::Response::ok(ServerFsm::Listener(listener, rx, m))
                     }
                 }
             },
@@ -300,16 +306,31 @@ where A: TryAccept,
         unimplemented!("timeout")
     }
 
-    fn wakeup(self, _scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
-        unimplemented!("wakeup")
+    fn wakeup(self, scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
+        match self {
+            ServerFsm::Listener(lst, shutdown, m) => {
+                if shutdown.try_recv().is_ok() {
+                    let _ = scope.deregister(&lst);
+                    scope.shutdown_loop();
+                    rotor::Response::done()
+                } else {
+                    rotor::Response::ok(ServerFsm::Listener(lst, shutdown, m))
+                }
+            },
+            conn => rotor::Response::ok(conn)
+        }
     }
 }
+
+#[derive(Debug)]
+struct Shutdown;
 
 /// A handle of the running server.
 pub struct Listening {
     /// The address this server is listening on.
     pub addr: SocketAddr,
-    handle: Option<(::std::thread::JoinHandle<()>,)>,
+    shutdown: (mpsc::Sender<Shutdown>, rotor::Notifier),
+    handle: Option<::std::thread::JoinHandle<()>>,
 }
 
 impl fmt::Debug for Listening {
@@ -322,7 +343,7 @@ impl fmt::Debug for Listening {
 
 impl Drop for Listening {
     fn drop(&mut self) {
-        self.handle.take().map(|(handle,)| {
+        self.handle.take().map(|handle| {
             handle.join().unwrap();
         });
     }
@@ -334,12 +355,10 @@ impl Listening {
 
     }
     /// Stop the server from listening to its socket address.
-    pub fn close(mut self) {
+    pub fn close(self) {
         debug!("closing server");
-        self.handle.take().map(|(handle,)| {
-            //tick.shutdown();
-            handle.join().unwrap();
-        });
+        self.shutdown.0.send(Shutdown).unwrap();
+        self.shutdown.1.wakeup().unwrap();
     }
 }
 

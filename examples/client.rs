@@ -1,3 +1,5 @@
+fn main() {}
+/*
 #![deny(warnings)]
 extern crate hyper;
 
@@ -58,3 +60,4 @@ fn main() {
     let client = Client::new().expect("Failed to create a Client");
     client.request(&url, Dump);
 }
+*/

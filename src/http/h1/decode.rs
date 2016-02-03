@@ -1,14 +1,39 @@
 use std::cmp;
 use std::io::{self, Read};
 
-use self::Decoder::{Length, Chunked, Eof};
+use self::Kind::{Length, Chunked, Eof};
 
 /// Decoders to handle different Transfer-Encodings.
 ///
 /// If a message body does not include a Transfer-Encoding, it *should*
 /// include a Content-Length header.
-#[derive(Debug)]
-pub enum Decoder {
+#[derive(Debug, Clone)]
+pub struct Decoder {
+    kind: Kind,
+}
+
+impl Decoder {
+    pub fn length(x: u64) -> Decoder {
+        Decoder {
+            kind: Kind::Length(x)
+        }
+    }
+
+    pub fn chunked() -> Decoder {
+        Decoder {
+            kind: Kind::Chunked(None)
+        }
+    }
+
+    pub fn eof() -> Decoder {
+        Decoder {
+            kind: Kind::Eof
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Kind {
     /// A Reader used when a Content-Length header is passed with a positive integer.
     Length(u64),
     /// A Reader used when Transfer-Encoding is `chunked`.
@@ -33,8 +58,8 @@ pub enum Decoder {
 impl Decoder {
     pub fn is_eof(&self) -> bool {
         trace!("is_eof? {:?}", self);
-        match *self {
-            Decoder::Length(0) | Decoder::Chunked(Some(0)) => true,
+        match self.kind {
+            Length(0) | Chunked(Some(0)) => true,
             _ => false
         }
     }
@@ -75,7 +100,7 @@ impl Decoder {
 
 impl Decoder {
     pub fn decode<R: Read>(&mut self, body: &mut R, buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
+        match self.kind {
             Length(ref mut remaining) => {
                 trace!("Sized read, remaining={:?}", remaining);
                 if *remaining == 0 {
@@ -271,7 +296,7 @@ mod tests {
     #[test]
     fn test_read_sized_early_eof() {
         let mut bytes = &b"foo bar"[..];
-        let mut decoder = Decoder::Length(10);
+        let mut decoder = Decoder::length(10);
         let mut buf = [0u8; 10];
         assert_eq!(decoder.decode(&mut bytes, &mut buf).unwrap(), 7);
         let e = decoder.decode(&mut bytes, &mut buf).unwrap_err();
@@ -285,7 +310,7 @@ mod tests {
             9\r\n\
             foo bar\
         "[..];
-        let mut decoder = Decoder::Chunked(None);
+        let mut decoder = Decoder::chunked();
         let mut buf = [0u8; 10];
         assert_eq!(decoder.decode(&mut bytes, &mut buf).unwrap(), 7);
         let e = decoder.decode(&mut bytes, &mut buf).unwrap_err();

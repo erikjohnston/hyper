@@ -94,39 +94,41 @@ impl<'a, T: Transport> Write for Encoder<'a, T> {
 
 /// Because privacy rules. Reasons.
 /// https://github.com/rust-lang/rust/issues/30905
-mod write_buf {
+mod internal {
+    use std::io::{self, Write};
+
     #[derive(Debug, Clone)]
     pub struct WriteBuf<T: AsRef<[u8]>> {
         pub bytes: T,
         pub pos: usize,
     }
-}
 
-pub trait AtomicWrite: Transport {
-    fn write_atomic(&mut self, bufs: &[&[u8]]) -> io::Result<usize>;
-}
-
-impl<T: Transport> AtomicWrite for T {
+    pub trait AtomicWrite {
+        fn write_atomic(&mut self, data: &[&[u8]]) -> io::Result<usize>;
+    }
 
     #[cfg(not(windows))]
-    fn write_atomic(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
-        use vecio::Rawv;
-        self.writev(bufs)
+    impl<T: Write + ::vecio::Writev> AtomicWrite for T {
+
+        fn write_atomic(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
+            use vecio::Rawv;
+            self.writev(bufs)
+        }
+
     }
 
     #[cfg(windows)]
-    fn write_atomic(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
-        let cap = bufs.iter().map(|buf| buf.len()).sum();
-        let mut vec = Vec::with_capacity(cap);
-        for buf in bufs {
-            vec.extend(buf);
+    impl<T: Write> AtomicWrite for T {
+        fn write_atomic(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
+            let cap = bufs.iter().map(|buf| buf.len()).fold(0, |total, next| total + next);
+            let mut vec = Vec::with_capacity(cap);
+            for &buf in bufs {
+                vec.extend(buf);
+            }
+            self.write(&vec)
         }
-
-        self.write(&vec)
     }
 }
-
-
 
 /// An Incoming Message head. Includes request/status line, and headers.
 #[derive(Debug, Default)]

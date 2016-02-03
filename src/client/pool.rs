@@ -44,15 +44,6 @@ impl Pool {
     }
 }
 
-impl http::Handler for Pool {
-    type Incoming = ::httparse::Response<'static, 'static>;
-    type Outgoing = http::Request;
-
-    fn on_incoming(&mut self, incoming: http::IncomingResponse, stream: http::Stream, transfer: http::Transfer<http::Request, net::Fresh>) {
-    
-    }
-}
-
 type Key = (String, u16, Scheme);
 
 fn key<T: Into<Scheme>>(host: &str, port: u16, scheme: T) -> Key {

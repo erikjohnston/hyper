@@ -68,15 +68,15 @@ use header::{Headers, Header, HeaderFormat};
 use header::{ContentLength, Location};
 use http;
 use method::Method;
-use net::{Transport, NetworkConnector, DefaultConnector};
+use net::{Transport, Connect, DefaultConnector};
 use {Url};
 use Error;
 
-//use self::pool::Pool;
+use self::pool::Pool;
 pub use self::request::Request;
 pub use self::response::Response;
 
-//mod pool;
+mod pool;
 mod request;
 mod response;
 
@@ -84,9 +84,8 @@ mod response;
 /// A Client to use additional features with Requests.
 ///
 /// Clients can handle things such as: redirect policy, connection pooling.
-pub struct Client<C: NetworkConnector = DefaultConnector> {
-    connector: C,
-    //tick: tick::Tick<C::Stream, Factory>,
+pub struct Client<C: Connect = DefaultConnector> {
+    rotor: rotor::LoopInstance<Pool, ClientFsm<C>>,
     redirect_policy: RedirectPolicy,
 }
 
@@ -106,12 +105,16 @@ impl Client {
 impl<C: NetworkConnector> Client<C> {
 
     /// Create a new client with a specific connector.
-    pub fn with_connector(connector: C) -> Client<C> {
-        Client {
-            connector: connector,
-            //tick: tick::Tick::new(Factory),
+    pub fn with_connector(connector: C) -> io::Result<Client<C>> {
+        let loop_ = try!(rotor::Loop::new(&rotor::Config::new()));
+        try!(loop_.add_machine_with(move |scope| {
+            
+        }));
+        let pool = Pool::new();
+        Ok(Client {
+            rotor: loop_.instantiate(),
             redirect_policy: RedirectPolicy::default(),
-        }
+        })
     }
 
     /// Set the RedirectPolicy.
@@ -138,23 +141,10 @@ pub trait Handler<T: Transport>: Send + 'static {
     fn on_response_readable(&mut self, response: &mut http::Decoder<T>) -> http::Next;
 }
 
-/*
-struct Factory;
-
-impl tick::ProtocolFactory for Factory {
-    type Protocol = http::Conn<Handler>;
-    fn create(&mut self, transfer: tick::Transfer, id: tick::Id) -> Self::Protocol {
-        trace!("Factory.create {:?}", id);
-        http::Conn::new(transfer, Handler)
-    }
-}
-*/
-
 struct Message<H: Handler<T>, T: Transport> {
     handler: H,
     _marker: PhantomData<T>,
 }
-
 
 impl<H: Handler<T>, T: Transport> http::MessageHandler for Message<H, T> {
     type Message = http::ClientMessage;
@@ -179,6 +169,65 @@ impl<H: Handler<T>, T: Transport> http::MessageHandler for Message<H, T> {
     }
 }
 
+struct Context<C: Connect> {
+    pool: Pool,
+    redirect_policy: RedirectPolicy,
+    connector: C,
+}
+
+enum ClientFsm<C, F, H>
+where C: Connect,
+      C::Output: Transport,
+      F: http::MessageHandlerFactory<C::Output, Output=Message<H, C::Output>>,
+      H: Handler<C::Output> {
+    Connector(C, PhantomData<F>),
+    Conn(http::Conn<C::Output, message::Message<H, C::Output>>)
+}
+
+impl<C, F, H> rotor::Machine for ServerFsm<C, F, H>
+where C: Connect,
+      C::Output: Transport,
+      F: http::MessageHandlerFactory<C::Output, Output=Message<H, C::Output>>,
+      H: Handler<C::Output> {
+    type Context = Context<C>;
+    type Seed = C::Output;
+
+    fn create(seed: Self::Seed, scope: &mut Scope<F>) -> Result<Self, Box<StdError>> {
+        try!(scope.register(&seed, EventSet::readable(), PollOpt::level()));
+        Ok(ClientFsm::Conn(http::Conn::new(seed)))
+    }
+
+    fn ready(self, events: EventSet, scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
+        match self {
+            ClientFsm::Connector(connector, m) => {
+                unimplemented!()
+            },
+            ClientFsm::Conn(conn) => {
+                if events.is_error() {
+                    error!("Conn error event");
+                }
+
+                match conn.ready(events, scope) {
+                    Some(conn) => rotor::Response::ok(ClientFsm::Conn(conn)),
+                    None => rotor::Response::done()
+                }
+            }
+        }
+    }
+
+    fn spawned(self, _scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
+        //TODO: could this be the default impl in the rotor crate?
+        rotor::Response::ok(self)
+    }
+
+    fn timeout(self, _scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
+        unimplemented!("timeout")
+    }
+
+    fn wakeup(self, _scope: &mut Scope<F>) -> rotor::Response<Self, Self::Seed> {
+        unimplemented!("wakeup")
+    }
+}
 
     /*
     fn _send(self) -> ::Result<Response> {

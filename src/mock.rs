@@ -1,6 +1,63 @@
 use std::cmp;
 use std::io::{self, Read, Write};
 
+#[derive(Debug)]
+pub struct Buf {
+    vec: Vec<u8>
+}
+
+impl Buf {
+    pub fn new() -> Buf {
+        Buf {
+            vec: vec![]
+        }
+    }
+}
+
+impl ::std::ops::Deref for Buf {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.vec
+    }
+}
+
+impl<S: AsRef<[u8]>> PartialEq<S> for Buf {
+    fn eq(&self, other: &S) -> bool {
+        self.vec == other.as_ref()
+    }
+}
+
+impl Write for Buf {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.vec.extend(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Read for Buf {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (&*self.vec).read(buf)
+    }
+}
+
+impl ::vecio::Writev for Buf {
+    fn writev(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
+        let cap = bufs.iter().map(|buf| buf.len()).fold(0, |total, next| total + next);
+        let mut vec = Vec::with_capacity(cap);
+        for &buf in bufs {
+            vec.extend(buf);
+        }
+
+        self.write(&vec)
+    }
+}
+
+#[derive(Debug)]
 pub struct Async<T> {
     inner: T,
     bytes_until_block: usize,
@@ -44,7 +101,7 @@ impl<T: Write> Write for Async<T> {
         }
     }
 
-    fn flush(&mut self) -> io::Result<usize> {
+    fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }
 }

@@ -66,17 +66,14 @@ impl Http1Message for ServerMessage {
     }
 
     fn decoder(head: &MessageHead<Self::Incoming>) -> ::Result<Decoder> {
-        use ::method::Method;
         use ::header;
-        if head.subject.0 == Method::Get || head.subject.0 == Method::Head {
-            Ok(Decoder::Length(0))
-        } else if let Some(&header::ContentLength(len)) = head.headers.get() {
-            Ok(Decoder::Length(len))
+        if let Some(&header::ContentLength(len)) = head.headers.get() {
+            Ok(Decoder::length(len))
         } else if head.headers.has::<header::TransferEncoding>() {
             todo!("check for Transfer-Encoding: chunked");
-            Ok(Decoder::Chunked(None))
+            Ok(Decoder::chunked())
         } else {
-            Ok(Decoder::Length(0))
+            Ok(Decoder::length(0))
         }
     }
 
@@ -164,24 +161,23 @@ impl Http1Message for ClientMessage {
 
 #[cfg(test)]
 mod tests {
-    use httparse;
-
+    use http;
     use super::{parse};
 
     #[test]
     fn test_parse_request() {
         let raw = b"GET /echo HTTP/1.1\r\nHost: hyper.rs\r\n\r\n";
-        parse::<httparse::Request, _>(raw).unwrap();
+        parse::<http::ServerMessage, _>(raw).unwrap();
     }
 
     #[test]
     fn test_parse_raw_status() {
         let raw = b"HTTP/1.1 200 OK\r\n\r\n";
-        let (res, _) = parse::<httparse::Response, _>(raw).unwrap().unwrap();
+        let (res, _) = parse::<http::ClientMessage, _>(raw).unwrap().unwrap();
         assert_eq!(res.subject.1, "OK");
 
         let raw = b"HTTP/1.1 200 Howdy\r\n\r\n";
-        let (res, _) = parse::<httparse::Response, _>(raw).unwrap().unwrap();
+        let (res, _) = parse::<http::ClientMessage, _>(raw).unwrap().unwrap();
         assert_eq!(res.subject.1, "Howdy");
     }
 
@@ -193,7 +189,7 @@ mod tests {
     fn bench_parse_incoming(b: &mut Bencher) {
         let raw = b"GET /echo HTTP/1.1\r\nHost: hyper.rs\r\n\r\n";
         b.iter(|| {
-            parse::<httparse::Request, _>(raw).unwrap()
+            parse::<http::ServerMessage, _>(raw).unwrap()
         });
     }
 

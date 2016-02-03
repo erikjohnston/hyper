@@ -9,10 +9,10 @@ use mio::{Selector, Token, Evented, EventSet, PollOpt, TryAccept};
 pub use self::openssl::Openssl;
 
 #[cfg(not(windows))]
-pub trait Transport: Read + Write + Evented + ::std::os::unix::io::AsRawFd {}
+pub trait Transport: Read + Write + Evented + ::vecio::Writev {}
 
 #[cfg(not(windows))]
-impl<T: Read + Write + Evented + ::std::os::unix::io::AsRawFd> Transport for T {}
+impl<T: Read + Write + Evented + ::vecio::Writev> Transport for T {}
 
 #[cfg(windows)]
 pub trait Transport: Read + Write + Evented {}
@@ -29,24 +29,93 @@ pub trait Connect {
 }
 
 /// An alias to `mio::tcp::TcpStream`.
-pub type HttpStream = TcpStream;
+#[derive(Debug)]
+pub struct HttpStream(pub TcpStream);
+
+impl Read for HttpStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl Write for HttpStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Evented for HttpStream {
+    #[inline]
+    fn register(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
+        self.0.register(selector, token, interest, opts)
+    }
+
+    #[inline]
+    fn reregister(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
+        self.0.reregister(selector, token, interest, opts)
+    }
+
+    #[inline]
+    fn deregister(&self, selector: &mut Selector) -> io::Result<()> {
+        self.0.deregister(selector)
+    }
+}
+
+impl ::vecio::Writev for HttpStream {
+    fn writev(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
+        use ::vecio::Rawv;
+        self.0.writev(bufs)
+    }
+}
 
 /// An alias to `mio::tcp::TcpListener`.
-pub type HttpListener = TcpListener;
+pub struct HttpListener(pub TcpListener);
+
+
+impl TryAccept for HttpListener {
+    type Output = HttpStream;
+
+    #[inline]
+    fn accept(&self) -> io::Result<Option<HttpStream>> {
+        TryAccept::accept(&self.0).map(|ok| ok.map(HttpStream))
+    }
+}
+
+impl Evented for HttpListener {
+    #[inline]
+    fn register(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
+        self.0.register(selector, token, interest, opts)
+    }
+
+    #[inline]
+    fn reregister(&self, selector: &mut Selector, token: Token, interest: EventSet, opts: PollOpt) -> io::Result<()> {
+        self.0.reregister(selector, token, interest, opts)
+    }
+
+    #[inline]
+    fn deregister(&self, selector: &mut Selector) -> io::Result<()> {
+        self.0.deregister(selector)
+    }
+}
+
 
 /// A connector that will produce HttpStreams.
 #[derive(Debug, Clone, Default)]
 pub struct HttpConnector;
 
 impl Connect for HttpConnector {
-    type Output = TcpStream;
+    type Output = HttpStream;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<TcpStream> {
+    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<HttpStream> {
         let addr = (host, port).to_socket_addrs().unwrap().next().unwrap();
         Ok(try!(match scheme {
             "http" => {
                 debug!("http scheme");
-                Ok(try!(TcpStream::connect(&addr)))
+                Ok(HttpStream(try!(TcpStream::connect(&addr))))
             },
             _ => {
                 Err(io::Error::new(io::ErrorKind::InvalidInput,
@@ -78,10 +147,10 @@ impl Connect for HttpConnector {
 /// });
 /// ```
 impl<F> Connect for F where F: Fn(&str, u16, &str) -> io::Result<TcpStream> {
-    type Output = TcpStream;
+    type Output = HttpStream;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<TcpStream> {
-        Ok(try!((*self)(host, port, scheme)))
+    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<HttpStream> {
+        Ok(HttpStream(try!((*self)(host, port, scheme))))
     }
 }
 
@@ -99,7 +168,7 @@ pub trait Ssl {
 #[derive(Debug)]
 pub enum HttpsStream<S: Transport> {
     /// A plain text stream.
-    Http(TcpStream),
+    Http(HttpStream),
     /// A stream protected by SSL.
     Https(S)
 }
@@ -132,8 +201,25 @@ impl<S: Transport> Write for HttpsStream<S> {
     }
 }
 
+impl<S: Transport> ::vecio::Writev for HttpsStream<S> {
+    fn writev(&mut self, bufs: &[&[u8]]) -> io::Result<usize> {
+        match *self {
+            HttpsStream::Http(ref mut s) => s.writev(bufs),
+            HttpsStream::Https(ref mut s) => s.writev(bufs)
+        }
+    }
+}
+
+
 #[cfg(unix)]
-impl<S: Transport> ::std::os::unix::io::AsRawFd for HttpsStream<S> {
+impl ::std::os::unix::io::AsRawFd for HttpStream {
+    fn as_raw_fd(&self) -> ::std::os::unix::io::RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+#[cfg(unix)]
+impl<S: Transport + ::std::os::unix::io::AsRawFd> ::std::os::unix::io::AsRawFd for HttpsStream<S> {
     fn as_raw_fd(&self) -> ::std::os::unix::io::RawFd {
         match *self {
             HttpsStream::Http(ref s) => s.as_raw_fd(),
@@ -243,7 +329,7 @@ impl<S: Ssl> HttpsConnector<S> {
 
 fn _assert_transport() {
     fn _assert<T: Transport>() {}
-    _assert::<HttpsStream<TcpStream>>();
+    _assert::<HttpsStream<HttpStream>>();
 }
 
 /*

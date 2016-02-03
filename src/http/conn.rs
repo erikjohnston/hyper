@@ -7,7 +7,7 @@ use std::time::Duration;
 use rotor::{EventSet, PollOpt, Scope};
 
 use http::{self, h1, Http1Message, Encoder, Decoder};
-use http::write_buf::WriteBuf;
+use http::internal::WriteBuf;
 use http::buffer::Buffer;
 use net::Transport;
 
@@ -94,6 +94,7 @@ impl<T: Transport, H: MessageHandler<T>> Conn<T, H> {
                         self.buf.consume(len);
                         match <<H as MessageHandler<T>>::Message as Http1Message>::decoder(&head) {
                             Ok(decoder) => {
+                                trace!("decoder = {:?}", decoder);
                                 let req_keep_alive = head.should_keep_alive();
                                 let mut handler = factory.create();
                                 let next = handler.on_incoming(head);
@@ -182,7 +183,17 @@ impl<T: Transport, H: MessageHandler<T>> Conn<T, H> {
                 };
                 let mut s = State::Http1(http1);
                 s.update(next);
-                s
+
+                let again = match s {
+                    State::Http1(Http1 { reading: Reading::Body(ref encoder), .. }) if encoder.is_eof() => true,
+                    _ => false
+                };
+
+                if again {
+                    self.read(factory, s)
+                } else {
+                    s
+                }
             },
             State::Closed => {
                 error!("on_readable State::Closed");
@@ -304,6 +315,12 @@ impl<T: Transport, H: MessageHandler<T>> Conn<T, H> {
                 return None;
             },
         };
+
+        if events.is_readable() && !self.buf.is_empty() {
+            return self.ready(events, scope);
+        }
+
+        trace!("scope.reregister({:?})", events);
         match scope.reregister(&self.transport, events, PollOpt::level()) {
             Ok(..) => Some(self),
             Err(e) => {
@@ -397,6 +414,7 @@ impl<H: MessageHandler<T>, T: Transport> State<H, T> {
             (State::Http1(mut http1), Next_::Write) => {
                 http1.writing = match http1.writing {
                     Writing::Wait(encoder) => Writing::Ready(encoder),
+                    Writing::Init => Writing::Head,
                     same => same
                 };
 
@@ -421,6 +439,7 @@ impl<H: MessageHandler<T>, T: Transport> State<H, T> {
                 };
                 http1.writing = match http1.writing {
                     Writing::Wait(encoder) => Writing::Ready(encoder),
+                    Writing::Init => Writing::Head,
                     same => same
                 };
                 State::Http1(http1)
