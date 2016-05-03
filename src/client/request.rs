@@ -66,7 +66,7 @@ impl Request<Fresh> {
             let (host, port) = try!(get_host_and_port(&url));
             headers.set(Host {
                 hostname: host.to_owned(),
-                port: Some(port),
+                port: port,
             });
         }
 

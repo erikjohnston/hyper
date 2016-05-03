@@ -80,7 +80,7 @@ pub trait NetworkConnector {
     type Stream: Into<Box<NetworkStream + Send>>;
 
     /// Connect to a remote address.
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<Self::Stream>;
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<Self::Stream>;
 }
 
 impl<T: NetworkStream + Send> From<T> for Box<NetworkStream + Send> {
@@ -366,8 +366,9 @@ pub struct HttpConnector;
 impl NetworkConnector for HttpConnector {
     type Stream = HttpStream;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<HttpStream> {
-        let addr = &(host, port);
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<HttpStream> {
+        let resolved_port = port.unwrap_or(80);
+        let addr = &(host, resolved_port);
         Ok(try!(match scheme {
             "http" => {
                 debug!("http scheme");
@@ -388,24 +389,24 @@ impl NetworkConnector for HttpConnector {
 /// Basic example:
 ///
 /// ```norun
-/// Client::with_connector(|addr: &str, port: u16, scheme: &str| {
-///     TcpStream::connect(&(addr, port))
+/// Client::with_connector(|addr: &str, port: Option<u16>, scheme: &str| {
+///     TcpStream::connect(&(addr, port.unwrap_or(80)))
 /// });
 /// ```
 ///
 /// Example using `TcpBuilder` from the net2 crate if you want to configure your source socket:
 ///
 /// ```norun
-/// Client::with_connector(|addr: &str, port: u16, scheme: &str| {
+/// Client::with_connector(|addr: &str, port: Option<u16>, scheme: &str| {
 ///     let b = try!(TcpBuilder::new_v4());
 ///     try!(b.bind("127.0.0.1:0"));
-///     b.connect(&(addr, port))
+///     b.connect(&(addr, port.unwrap_or(80)))
 /// });
 /// ```
-impl<F> NetworkConnector for F where F: Fn(&str, u16, &str) -> io::Result<TcpStream> {
+impl<F> NetworkConnector for F where F: Fn(&str, Option<u16>, &str) -> io::Result<TcpStream> {
     type Stream = HttpStream;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<HttpStream> {
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<HttpStream> {
         Ok(HttpStream(try!((*self)(host, port, scheme))))
     }
 }
@@ -588,8 +589,13 @@ impl<S: SslClient, C: NetworkConnector> HttpsConnector<S, C> {
 impl<S: SslClient, C: NetworkConnector<Stream=HttpStream>> NetworkConnector for HttpsConnector<S, C> {
     type Stream = HttpsStream<S::Stream>;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<Self::Stream> {
-        let stream = try!(self.connector.connect(host, port, "http"));
+    fn connect(&self, host: &str, opt_port: Option<u16>, scheme: &str) -> ::Result<Self::Stream> {
+        let port = opt_port.unwrap_or_else(|| match scheme {
+            "https" => 443,
+            _ => 80,
+        });
+        let stream = try!(self.connector.connect(host, Some(port), "http"));
+
         if scheme == "https" {
             debug!("https scheme");
             self.ssl.wrap_client(stream, host).map(HttpsStream::Https)
@@ -870,4 +876,3 @@ mod tests {
         assert_eq!(mock, Box::new(MockStream::new()));
     }
 }
-

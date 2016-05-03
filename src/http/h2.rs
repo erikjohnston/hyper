@@ -146,7 +146,7 @@ impl<C, S> Http2Protocol<C, S> where C: NetworkConnector<Stream=S> + Send + 'sta
 
 impl<C, S> Protocol for Http2Protocol<C, S> where C: NetworkConnector<Stream=S> + Send + 'static,
                                                   S: NetworkStream + Send + Clone {
-    fn new_message(&self, host: &str, port: u16, scheme: &str) -> ::Result<Box<HttpMessage>> {
+    fn new_message(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<Box<HttpMessage>> {
         let stream = try!(self.connector.connect(host, port, scheme)).into();
 
         let scheme = match scheme {
@@ -441,7 +441,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &Headers::new(), None);
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -462,7 +462,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &Headers::new(), Some(vec![1, 2, 3]));
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -483,7 +483,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &Headers::new(), Some(vec![]));
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -507,7 +507,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &headers, Some(vec![1, 2, 3]));
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -531,7 +531,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &Headers::new(), None);
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
 
         // No outgoing set yet, so nothing can be read at this point.
         assert!(message.read(&mut [0; 5]).is_err());
@@ -544,7 +544,7 @@ mod tests {
         mock_connector.new_response_stream(b"200", &Headers::new(), None);
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -579,7 +579,7 @@ mod tests {
         let stream = mock_connector.new_response_stream(b"200", &Headers::new(), Some(vec![]));
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,
@@ -607,7 +607,7 @@ mod tests {
         let stream = mock_connector.new_response_stream(b"200", &Headers::new(), None);
         let protocol = Http2Protocol::with_connector(mock_connector);
 
-        let mut message = protocol.new_message("127.0.0.1", 1337, "http").unwrap();
+        let mut message = protocol.new_message("127.0.0.1", Some(1337), "http").unwrap();
         message.set_outgoing(RequestHead {
             headers: Headers::new(),
             method: method::Method::Get,

@@ -37,9 +37,9 @@ struct PoolImpl<S> {
     config: Config,
 }
 
-type Key = (String, u16, Scheme);
+type Key = (String, Option<u16>, Scheme);
 
-fn key<T: Into<Scheme>>(host: &str, port: u16, scheme: T) -> Key {
+fn key<T: Into<Scheme>>(host: &str, port: Option<u16>, scheme: T) -> Key {
     (host.to_owned(), port, scheme.into())
 }
 
@@ -100,7 +100,7 @@ impl<S> PoolImpl<S> {
 
 impl<C: NetworkConnector<Stream=S>, S: NetworkStream + Send> NetworkConnector for Pool<C> {
     type Stream = PooledStream<S>;
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<PooledStream<S>> {
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<PooledStream<S>> {
         let key = key(host, port, scheme);
 
         let inner = {
@@ -253,14 +253,14 @@ mod tests {
     #[test]
     fn test_connect_and_drop() {
         let pool = mocked!();
-        let key = key("127.0.0.1", 3000, "http");
-        pool.connect("127.0.0.1", 3000, "http").unwrap();
+        let key = key("127.0.0.1", Some(3000), "http");
+        pool.connect("127.0.0.1", Some(3000), "http").unwrap();
         {
             let locked = pool.inner.lock().unwrap();
             assert_eq!(locked.conns.len(), 1);
             assert_eq!(locked.conns.get(&key).unwrap().len(), 1);
         }
-        pool.connect("127.0.0.1", 3000, "http").unwrap(); //reused
+        pool.connect("127.0.0.1", Some(3000), "http").unwrap(); //reused
         {
             let locked = pool.inner.lock().unwrap();
             assert_eq!(locked.conns.len(), 1);
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn test_closed() {
         let pool = mocked!();
-        let mut stream = pool.connect("127.0.0.1", 3000, "http").unwrap();
+        let mut stream = pool.connect("127.0.0.1", Some(3000), "http").unwrap();
         stream.close(Shutdown::Both).unwrap();
         drop(stream);
         let locked = pool.inner.lock().unwrap();
@@ -282,7 +282,7 @@ mod tests {
     fn test_eof_closes() {
         let pool = mocked!();
 
-        let mut stream = pool.connect("127.0.0.1", 3000, "http").unwrap();
+        let mut stream = pool.connect("127.0.0.1", Some(3000), "http").unwrap();
         assert_eq!(stream.read(&mut [0]).unwrap(), 0);
         drop(stream);
         let locked = pool.inner.lock().unwrap();

@@ -23,7 +23,7 @@ use traitobject;
 /// protocol.
 pub trait Protocol {
     /// Creates a fresh `HttpMessage` bound to the given host, based on the given protocol scheme.
-    fn new_message(&self, host: &str, port: u16, scheme: &str) -> ::Result<Box<HttpMessage>>;
+    fn new_message(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<Box<HttpMessage>>;
 }
 
 /// Describes a request.

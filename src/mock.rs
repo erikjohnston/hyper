@@ -174,7 +174,7 @@ pub struct MockConnector;
 impl NetworkConnector for MockConnector {
     type Stream = MockStream;
 
-    fn connect(&self, _host: &str, _port: u16, _scheme: &str) -> ::Result<MockStream> {
+    fn connect(&self, _host: &str, _port: Option<u16>, _scheme: &str) -> ::Result<MockStream> {
         Ok(MockStream::new())
     }
 }
@@ -189,7 +189,7 @@ macro_rules! mock_connector (
 
         impl $crate::net::NetworkConnector for $name {
             type Stream = ::mock::MockStream;
-            fn connect(&self, host: &str, port: u16, scheme: &str)
+            fn connect(&self, host: &str, port: Option<u16>, scheme: &str)
                     -> $crate::Result<::mock::MockStream> {
                 use std::collections::HashMap;
                 debug!("MockStream::connect({:?}, {:?}, {:?})", host, port, scheme);
@@ -213,7 +213,7 @@ macro_rules! mock_connector (
 
         impl $crate::net::NetworkConnector for $name {
             type Stream = $crate::mock::MockStream;
-            fn connect(&self, _: &str, _: u16, _: &str)
+            fn connect(&self, _: &str, _: Option<u16>, _: &str)
                     -> $crate::Result<$crate::mock::MockStream> {
                 Ok($crate::mock::MockStream::with_responses(vec![
                     $($response),+
@@ -310,7 +310,7 @@ impl MockHttp2Connector {
 impl NetworkConnector for MockHttp2Connector {
     type Stream = CloneableMockStream;
     #[inline]
-    fn connect(&self, _host: &str, _port: u16, _scheme: &str)
+    fn connect(&self, _host: &str, _port: Option<u16>, _scheme: &str)
             -> ::Result<CloneableMockStream> {
         Ok(self.streams.borrow_mut().remove(0))
     }

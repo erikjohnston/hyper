@@ -288,7 +288,7 @@ impl<'a> RequestBuilder<'a> {
                 };
                 headers.set(Host {
                     hostname: host.to_owned(),
-                    port: Some(port),
+                    port: port,
                 });
                 Request::with_headers_and_message(method.clone(), url.clone(), headers, message)
             };
@@ -463,17 +463,13 @@ impl Default for RedirectPolicy {
     }
 }
 
-
-fn get_host_and_port(url: &Url) -> ::Result<(&str, u16)> {
+fn get_host_and_port(url: &Url) -> ::Result<(&str, Option<u16>)> {
     let host = match url.host_str() {
         Some(host) => host,
         None => return Err(Error::Uri(UrlError::EmptyHost))
     };
     trace!("host={:?}", host);
-    let port = match url.port_or_known_default() {
-        Some(port) => port,
-        None => return Err(Error::Uri(UrlError::InvalidPort))
-    };
+    let port = url.port();
     trace!("port={:?}", port);
     Ok((host, port))
 }
@@ -524,7 +520,7 @@ mod tests {
         let mut dump = vec![];
         client.get("http://127.0.0.1/foo/bar").send().unwrap().read_to_end(&mut dump).unwrap();
 
-        let box_message = client.protocol.new_message("127.0.0.1", 80, "http").unwrap();
+        let box_message = client.protocol.new_message("127.0.0.1", Some(80), "http").unwrap();
         let message = box_message.downcast::<Http11Message>().unwrap();
         let stream =  message.into_inner().downcast::<MessageStream>().unwrap().into_inner().into_normal().unwrap();;
 
@@ -553,7 +549,7 @@ mod tests {
         let mut dump = vec![];
         client.get("https://127.0.0.1/foo/bar").send().unwrap().read_to_end(&mut dump).unwrap();
 
-        let box_message = client.protocol.new_message("127.0.0.1", 443, "https").unwrap();
+        let box_message = client.protocol.new_message("127.0.0.1", Some(443), "https").unwrap();
         let message = box_message.downcast::<Http11Message>().unwrap();
         let stream = message.into_inner().downcast::<MessageStream>().unwrap().into_inner().into_tunneled().unwrap();
 

@@ -440,7 +440,7 @@ pub struct Http11Protocol {
 }
 
 impl Protocol for Http11Protocol {
-    fn new_message(&self, host: &str, port: u16, scheme: &str) -> ::Result<Box<HttpMessage>> {
+    fn new_message(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<Box<HttpMessage>> {
         let stream = try!(self.connector.connect(host, port, scheme)).into();
 
         Ok(Box::new(Http11Message::with_stream(stream)))
@@ -465,7 +465,7 @@ impl<C: NetworkConnector<Stream=S> + Send + Sync, S: NetworkStream + Send>
         NetworkConnector for ConnAdapter<C> {
     type Stream = Box<NetworkStream + Send>;
     #[inline]
-    fn connect(&self, host: &str, port: u16, scheme: &str)
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str)
         -> ::Result<Box<NetworkStream + Send>> {
         Ok(try!(self.0.connect(host, port, scheme)).into())
     }
@@ -476,7 +476,7 @@ struct Connector(Box<NetworkConnector<Stream=Box<NetworkStream + Send>> + Send +
 impl NetworkConnector for Connector {
     type Stream = Box<NetworkStream + Send>;
     #[inline]
-    fn connect(&self, host: &str, port: u16, scheme: &str)
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str)
         -> ::Result<Box<NetworkStream + Send>> {
         Ok(try!(self.0.connect(host, port, scheme)).into())
     }

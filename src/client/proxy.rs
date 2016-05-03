@@ -50,21 +50,21 @@ where C: NetworkConnector + Send + Sync + 'static,
       S: SslClient<C::Stream> {
     type Stream = Proxied<C::Stream, S::Stream>;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> ::Result<Self::Stream> {
+    fn connect(&self, host: &str, port: Option<u16>, scheme: &str) -> ::Result<Self::Stream> {
         use httparse;
         use std::io::{Read, Write};
         use ::version::HttpVersion::Http11;
-        trace!("{:?} proxy for '{}://{}:{}'", self.proxy, scheme, host, port);
+        trace!("{:?} proxy for '{}://{}:{:?}'", self.proxy, scheme, host, port);
         match scheme {
             "http" => {
-                self.connector.connect(self.proxy.0.as_ref(), self.proxy.1, "http")
+                self.connector.connect(self.proxy.0.as_ref(), Some(self.proxy.1), "http")
                     .map(Proxied::Normal)
             },
             "https" => {
-                let mut stream = try!(self.connector.connect(self.proxy.0.as_ref(), self.proxy.1, "http"));
-                trace!("{:?} CONNECT {}:{}", self.proxy, host, port);
+                let mut stream = try!(self.connector.connect(self.proxy.0.as_ref(), Some(self.proxy.1), "http"));
+                trace!("{:?} CONNECT {}:{:?}", self.proxy, host, port);
                 try!(write!(&mut stream, "{method} {host}:{port} {version}\r\nHost: {host}:{port}\r\n\r\n",
-                            method=Method::Connect, host=host, port=port, version=Http11));
+                            method=Method::Connect, host=host, port=port.unwrap_or(443), version=Http11));
                 try!(stream.flush());
                 let mut buf = [0; 1024];
                 let mut n = 0;
