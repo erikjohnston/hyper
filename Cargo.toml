@@ -51,8 +51,8 @@ optional = true
 
 [dev-dependencies]
 num_cpus = "1.0"
-#env_logger = "0.3"
-pretty_env_logger = {path="../pretty-env-logger"}
+env_logger = "0.3"
+#pretty_env_logger = {path="../pretty-env-logger"}
 
 [features]
 default = ["ssl"]
